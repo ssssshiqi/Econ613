@@ -318,17 +318,20 @@ h <- filter(hhind2,pro.change==1|emp.change==1, ymd1==1|ymd4==1)
 # Hint: Construct a year of entry and exit for each individual.
 
 #find the entry year and exit year 
-
-i_ee <- mutate(group_by(ind_app,idind), entry = min(year), exit = max(year)+1)
+i_ee <- mutate(group_by(ind_app,idind), entry = min(year), exit = max(year))
 
 #select related variables, and only individual entry before 2019
-i_ee1 <- filter(select(ungroup(i_ee), idind, year,entry,exit),entry<2019)
-#decide to count the share of people still in survey instead
-i_ee2 <- count(i_ee1, entry, year)
-i_ee3 <- mutate(group_by(i_ee2,entry),all_entry=max(n))
-i_ee4 <- ungroup(mutate(i_ee3,stay=n/all_entry))
-i_ee5 <- select(i_ee4,entry,year,stay)
-#them the table show how many people from each year still in survey in different years
-pivot_wider(i_ee5,names_from=year,values_from=stay)
+i_ee1 <- filter(select(ungroup(i_ee), idind, year,entry,exit),year<2019)
+#found hpow many people exit by year 
+iee2 <- count(i_ee1,exit,year)
+iee3 <- mutate(group_by(iee2,year),total=sum(n))
+iee4 <- ungroup(mutate(iee3,exitrate=n/total))
+iee5 <- select(iee4,year,exit,exitrate)
+pivot_wider(iee5,names_from=year,values_from=exitrate)
+
+
+
+
+
 
 

@@ -1,1 +1,1 @@
-# Econ 613_Shiqi ZHou
+# Econ 613_Shiqi Zhou

@@ -426,7 +426,7 @@ linearl <- function(par, Y, X1, yr1, yr2, yr3, yr4, yr5, yr6, yr7, yr8, yr9, yr1
 }
 
 #####==optimize===========
-runtimes <- 77 
+runtimes <- 35 
 rr_year3 <-mat.or.vec(runtimes, 13) 
 colnames(rr_year3) <- c("Coef.Con","Coef.age","Coef.yr2006","Coef.yr2007","Coef.yr2008","Coef.yr2009",
                         "Coef.yr2010","Coef.yr2011","Coef.yr2012","Coef.yr2013","Coef.yr2014","Coef.yr2015",

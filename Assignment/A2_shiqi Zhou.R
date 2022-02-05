@@ -233,7 +233,7 @@ rr1 <- as.data.frame(rr1)
 # as results, the coeffi.con is 1.045492, the coeffi.age is 0.006893732, and the min negative likelihood is 3555.89 
 # which is checked by logLik() above.
 # from result, we find that, age has a positive effect on labor market participation, 
-# in specific, one year older increases the probability of labor participation by 0.006893732
+# for specific value how much age effects on labor market participation needs to calculate the marginal effects
 #=============================================
 
 # 3.4 Can you estimate the same model including wages as a determinant of labor market participation? Explain.
@@ -458,9 +458,10 @@ rr_year3 <- as.data.frame(rr_year3)
 #1)	In probit model, Coef.age is 0.01281,  Coef.con is 0.7296
 #2)	In logit model, Coef.age is 0.02531, Coef.con is 1.1200
 #3)	In linear model, Coef.age is 0.105175, Coef.con is -1.1475
-#4)	Coefficients in probit and logit model relatively closer, compared with linear model. And the coefficient of age in probit is the smallest. 
-#   All age in different models has positive effects on participation in labor market, age increases 1, the probability of 
-#   participating labor market increases 0.01281, 0.02531, 0.105175 in probit, logit and linear model, respectively.
+#4)	4)	Coefficients in probit and logit model relatively closer, compared with linear model. 
+#       And the coefficient of age in probit is the smallest. All age in different models has 
+#       positive effects on participation in labor market, the specific value of the effect 
+#       needs to compute the marginal effects in probit and logit, respectively.
 #Significance: Hessian matrices in optimizing are always 0, so, do not know the significance
 
 

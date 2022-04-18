@@ -1,0 +1,861 @@
+---
+title: "A4"
+author: "Shiqi Zhou"
+date: "4/6/2022"
+output: pdf_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list = ls())
+library(data.table)
+library(scales)
+library(tidyverse)
+library(dplyr)
+library(gmodels)
+library(ggplot2)
+library(tidyr)
+library(reshape2)
+library(xtable)
+library(mlogit)
+library(stargazer)
+library(texreg)
+library(survival)
+library(nnet)
+library(esquisse)
+library(micEcon)
+library(sampleSelection)
+library(AER)
+library(margins)
+library(readr)
+library(panelr)
+library(plm)
+
+```
+
+```{r}
+#set path
+getwd()
+mainpath = "/Users/zhoushiqi/Desktop/613/A4/A4.R"
+setwd(mainpath)
+getwd()
+datapath = "/Data.A4"
+
+#import datasets
+DATA <- list.files(paste0(mainpath,datapath))
+for (i in 1:length(DATA)) {
+  assign(sub(".csv","",DATA[i]), fread(paste0(paste0(mainpath,datapath),"/",
+                                              DATA[i]),encoding = "UTF-8"))
+}
+```
+
+# Exercise 1 Preparing the Data
+
+```{r}
+names(dat_A4)
+dat_A4=select(dat_A4,-V1,)
+names(dat_A4_panel)
+dat_A4_panel=select(dat_A4_panel,-V1)
+colnames(dat_A4_panel)[248]="YINC_1700_2019"
+colnames(dat_A4_panel)[2]="YINC_1700_1997"
+```
+
+#1.1 Create additional variable for the age of the agent “age”, total work experience measured in years “work exp”.
+```{r}
+#create "age" variables
+dat = mutate(dat_A4, age_1997=1997-KEY_BDATE_Y_1997, 
+             age_2019=2019-KEY_BDATE_Y_1997)
+#age in 1997
+(count(group_by(dat,age_1997)))
+#age in 1997
+(count(group_by(dat,age_2019)))
+```
+
+```{r}
+#create work experience in year “work exp”
+
+#first, create work time in weeks
+a = dat[,c(1,17:27)]
+a[is.na(a)]<-0
+a$work_exp_week = rowSums(a[,2:12])
+a1 = a[,c(1,13)]
+dat = left_join(dat,a1,by="X")
+#then, translate it into years (assume that there are 52 weeks in a year)
+dat$work_exp_years = dat$work_exp_week/52
+```
+
+
+
+#1.2 Create additional education variables indicating total years of schooling from all variables related to education.
+```{r}
+#all variables related to education
+b = dat[,c(1,7:10,28)]
+b$bio.fa.edu=ifelse(b$CV_HGC_BIO_DAD_1997==95,0,b$CV_HGC_BIO_DAD_1997)
+b$bio.mo.edu=ifelse(b$CV_HGC_BIO_MOM_1997==95,0,b$CV_HGC_BIO_MOM_1997)
+b$res.fa.edu=ifelse(b$CV_HGC_RES_DAD_1997==95,0,b$CV_HGC_RES_DAD_1997)
+b$res.mo.edu=ifelse(b$CV_HGC_RES_MOM_1997==95,0,b$CV_HGC_RES_MOM_1997)
+
+#translate the highest degree to schooling year
+#GED equals to high school degree for 12 years(2,3); 
+#2 years for AA(4)=12+2; 
+#4 years for Bachelor(5)=12+4; 
+#take 2 years for Master and all have Bachelor degree(usually 1.5-2 years)=18
+#for PHD and professional degree take them as 20 years or more
+b$self.edu.2019=
+  ifelse(b$YSCH.3113_2019==1,0,
+         ifelse(b$YSCH.3113_2019==2,12,
+                ifelse(b$YSCH.3113_2019==3,12,
+                       ifelse(b$YSCH.3113_2019==4,14,
+                              ifelse(b$YSCH.3113_2019==5,16,
+                                     ifelse(b$YSCH.3113_2019==6,18,
+                                            ifelse(b$YSCH.3113_2019==7,20,
+                                                   ifelse(b$YSCH.3113_2019==8,
+                                                          20,0))))))))
+b1=b[,c(1,7:11)]
+b1[is.na(b1)]<-0
+
+#create the indicator for schooling year
+b1$sy.edu.parents=rowSums(b1[,2:5])
+b1$sy.edu.all=rowSums(b1[,2:6])
+
+b2=b1[,c(1,7:8)]
+
+dat = left_join(dat,b2,by="X")
+```
+
+#1.3 Provide the following visualizations.
+```{r}
+#set up dataset used in this problem, 
+#include income in panel data because censor problem
+c=select(dat,PUBID_1997,YINC_1700_2019,age_1997,age_2019,KEY_SEX_1997,
+         CV_MARSTAT_COLLAPSED_2019,CV_BIO_CHILD_HH_U18_2019)
+c=filter(c,!is.na(YINC_1700_2019))
+#the top-coded income is 1e+05
+max(c$YINC_1700_2019)
+#include income in panel data as YINC_1700_2019.y
+u=select(dat_A4_panel,PUBID_1997,YINC_1700_2019)
+c=left_join(c,u,by="PUBID_1997")
+names(c)
+#the real max income in panel data is 328451
+max(c$YINC_1700_2019.y)
+max(c$YINC_1700_2019.x)
+#group the income variable
+c <- mutate(c,income.group.x=case_when(YINC_1700_2019.x == 0  ~ "0",
+                                     YINC_1700_2019.x >= 1 & YINC_1700_2019.x <= 4999 ~ "1-4999",
+                                     YINC_1700_2019.x >= 5000 & YINC_1700_2019.x <= 9999 ~ "5000-9999",
+                                     YINC_1700_2019.x >= 10000 & YINC_1700_2019.x <= 14999 ~ "10000-14999",
+                                     YINC_1700_2019.x >= 15000 & YINC_1700_2019.x <= 19999 ~ "15000-19999",
+                                     YINC_1700_2019.x >= 20000 & YINC_1700_2019.x <= 24999 ~ "20000-24999",
+                                     YINC_1700_2019.x >= 25000 & YINC_1700_2019.x <= 29999 ~ "25000-29999",
+                                     YINC_1700_2019.x >= 30000 & YINC_1700_2019.x <= 39999 ~ "30000-39999",
+                                     YINC_1700_2019.x >= 40000 & YINC_1700_2019.x <= 49999 ~ "40000-49999",
+                                     YINC_1700_2019.x >= 50000 & YINC_1700_2019.x <= 59999 ~ "50000-59999",
+                                     YINC_1700_2019.x >= 60000 & YINC_1700_2019.x <= 69999 ~ "60000-69999",
+                                     YINC_1700_2019.x >= 70000 & YINC_1700_2019.x <= 79999 ~ "70000-79999",
+                                     YINC_1700_2019.x >= 80000 & YINC_1700_2019.x <= 89999 ~ "80000-89999",
+                                     YINC_1700_2019.x >= 90000 & YINC_1700_2019.x <= 99999 ~ "90000-99999",
+                                     YINC_1700_2019.x >= 100000 ~ "100000+"
+                                     ))
+
+
+c <- mutate(c,income.group.y=case_when(YINC_1700_2019.y == 0  ~ "0",
+                                     YINC_1700_2019.y >= 1 & YINC_1700_2019.y <= 4999 ~ "1-4999",
+                                     YINC_1700_2019.y >= 5000 & YINC_1700_2019.y <= 9999 ~ "5000-9999",
+                                     YINC_1700_2019.y >= 10000 & YINC_1700_2019.y <= 14999 ~ "10000-14999",
+                                     YINC_1700_2019.y >= 15000 & YINC_1700_2019.y <= 19999 ~ "15000-19999",
+                                     YINC_1700_2019.y >= 20000 & YINC_1700_2019.y <= 24999 ~ "20000-24999",
+                                     YINC_1700_2019.y >= 25000 & YINC_1700_2019.y <= 29999 ~ "25000-29999",
+                                     YINC_1700_2019.y >= 30000 & YINC_1700_2019.y <= 39999 ~ "30000-39999",
+                                     YINC_1700_2019.y >= 40000 & YINC_1700_2019.y <= 49999 ~ "40000-49999",
+                                     YINC_1700_2019.y >= 50000 & YINC_1700_2019.y <= 59999 ~ "50000-59999",
+                                     YINC_1700_2019.y >= 60000 & YINC_1700_2019.y <= 69999 ~ "60000-69999",
+                                     YINC_1700_2019.y >= 70000 & YINC_1700_2019.y <= 79999 ~ "70000-79999",
+                                     YINC_1700_2019.y >= 80000 & YINC_1700_2019.y <= 89999 ~ "80000-89999",
+                                     YINC_1700_2019.y >= 90000 & YINC_1700_2019.y <= 99999 ~ "90000-99999",
+                                     YINC_1700_2019.y >= 100000 & YINC_1700_2019.y <= 149999 ~ "100000-149999",
+                                     YINC_1700_2019.y >= 150000 ~ "150000+"
+                                     ))
+c <- mutate(c,ag=as.factor(age_2019))
+c <- mutate(c,gender=as.factor(KEY_SEX_1997))
+c <- mutate(c,child.num=as.factor(CV_BIO_CHILD_HH_U18_2019))
+c <- mutate(c,marital=as.factor(CV_MARSTAT_COLLAPSED_2019))
+
+#1.3.1 Plot the income data (where income is positive) by 
+c1=filter(c,YINC_1700_2019.y>0)
+
+
+#i) age groups
+#bar chart
+ggplot(c1, aes(x = ag, y = YINC_1700_2019.y)) +
+  geom_boxplot() +
+  scale_y_continuous(labels = label_comma(), limits = c(NA, 200000)) +
+  ggtitle("the income of each age groups")+
+  theme(plot.title=element_text(hjust=0.5))
+```
+
+#Part 1 in 1.3: plot with income variable in cross section data where censor problem exist, then plot with income variable in panel data
+```{r}
+#1.3.1 Plot the income data (where income is positive) with income variable 
+#in cross section data where censor problem exist  
+c1=filter(c,YINC_1700_2019.x>0)
+
+#i) age groups
+#bar chart
+ggplot(c1, aes(x = ag, y = YINC_1700_2019.x)) +
+  geom_boxplot() +
+  scale_y_continuous(labels = label_comma(), limits = c(NA, 100000)) +
+  ggtitle("the income of each age groups")+
+  theme(plot.title=element_text(hjust=0.5))
+```
+
+```{r}
+#1.3.1 i) by age groups
+#histogram
+ggplot(c1, aes(x=YINC_1700_2019.x)) +
+  geom_histogram()+
+  facet_wrap( ~ag)+
+  ggtitle("Compare the income distribution between age groups")+
+  theme(plot.title=element_text(hjust=0.5))
+```
+
+```{r}
+#1.3.1 ii) by gender groups and
+#bar chart
+ggplot(c1, aes(x = gender, y = YINC_1700_2019.x)) +
+  geom_boxplot() +
+  scale_y_continuous(labels = label_comma(), limits = c(NA, 100000)) +
+  ggtitle("the income of each age groups")+
+  theme(plot.title=element_text(hjust=0.5))
+```
+
+```{r}
+#1.3.1 ii) by gender groups and
+#histogram
+ggplot(c1, aes(x=YINC_1700_2019.x, color=gender)) +
+  geom_histogram(fill="white", alpha=0.5,bins=30,
+                 position="identity")+
+  ggtitle("Compare the distribution between men and women")+
+  theme(plot.title=element_text(hjust=0.5))
+```
+
+```{r}
+#1.3.1 iii) by number of children
+#bar chart
+ggplot(c1, aes(x = child.num, y = YINC_1700_2019.x)) +
+  geom_boxplot() +
+  scale_y_continuous(labels = label_comma(), limits = c(NA, 200000)) +
+  ggtitle("the income of each age groups")+
+  theme(plot.title=element_text(hjust=0.5))
+
+```
+
+```{r}
+#1.3.1 iii) by number of children
+#histogram
+ggplot(c1, aes(x=YINC_1700_2019.x)) +
+  geom_histogram()+
+  facet_wrap( ~child.num)+
+  ggtitle("Compare the income distribution between age groups")+
+  theme(plot.title=element_text(hjust=0.5))
+```
+
+
+```{r}
+#1.3.2 Table the share of ”0” in the income data by 
+c1.1=filter(c,YINC_1700_2019.x==0)
+#i) age groups
+(count(group_by(c1.1,age_2019)))
+```
+
+```{r}
+#ii) gender groups
+(count(group_by(c1.1,KEY_SEX_1997)))
+```
+
+```{r}
+#iii) number of children and marital status
+(count(group_by(c1.1,CV_MARSTAT_COLLAPSED_2019,CV_BIO_CHILD_HH_U18_2019)))
+```
+
+#Part 1 in 1.3: then plot with income variable in panel data
+```{r}
+#1.3.1 Plot the income data (where income is positive)  
+c2=filter(c,YINC_1700_2019.y>0)
+
+#i) age groups
+#bar chart
+ggplot(c2, aes(x = ag, y = YINC_1700_2019.y)) +
+  geom_boxplot() +
+  scale_y_continuous(labels = label_comma(), limits = c(NA, 200000)) +
+  ggtitle("the income of each age groups")+
+  theme(plot.title=element_text(hjust=0.5))
+
+```
+
+```{r}
+#1.3.1 i) by age groups
+#histogram
+ggplot(c2, aes(x=YINC_1700_2019.y)) +
+  geom_histogram()+
+  facet_wrap( ~ag)+
+  ggtitle("Compare the income distribution between age groups")+
+  theme(plot.title=element_text(hjust=0.5))
+```
+
+```{r}
+#1.3.1 ii) by gender groups and
+#bar chart
+ggplot(c2, aes(x = gender, y = YINC_1700_2019.y)) +
+  geom_boxplot() +
+  scale_y_continuous(labels = label_comma(), limits = c(NA, 100000)) +
+  ggtitle("the income of each age groups")+
+  theme(plot.title=element_text(hjust=0.5))
+```
+
+```{r}
+#1.3.1 ii) by gender groups and
+#histogram
+ggplot(c2, aes(x=YINC_1700_2019.y, color=gender)) +
+  geom_histogram(fill="white", alpha=0.5,bins=30,
+                 position="identity")+
+  ggtitle("Compare the distribution between men and women")+
+  theme(plot.title=element_text(hjust=0.5))
+```
+
+```{r}
+#1.3.1 iii) by number of children
+#bar chart
+ggplot(c2, aes(x = child.num, y = YINC_1700_2019.y)) +
+  geom_boxplot() +
+  scale_y_continuous(labels = label_comma(), limits = c(NA, 200000)) +
+  ggtitle("the income of each age groups")+
+  theme(plot.title=element_text(hjust=0.5))
+
+```
+
+```{r}
+#1.3.1 iii) by number of children
+#histogram
+ggplot(c2, aes(x=YINC_1700_2019.y)) +
+  geom_histogram()+
+  facet_wrap( ~child.num)+
+  ggtitle("Compare the income distribution between age groups")+
+  theme(plot.title=element_text(hjust=0.5))
+```
+
+
+```{r}
+#1.3.2 Table the share of ”0” in the income data by 
+c2.1=filter(c,YINC_1700_2019.y==0)
+#i) age groups
+(count(group_by(c2.1,age_2019)))
+```
+
+```{r}
+#ii) gender groups
+(count(group_by(c2.1,KEY_SEX_1997)))
+```
+
+```{r}
+#iii) number of children and marital status
+(count(group_by(c2.1,CV_MARSTAT_COLLAPSED_2019,CV_BIO_CHILD_HH_U18_2019)))
+```
+#1.3.3 interpret the visualizations from above
+#Interpret: 
+#For positive income: both in dat and dat.panel
+#Generally, the average income increases as age increases;
+#the income of male is higher than that of female;
+#the average income increases with numbers of children in hh, then decreases. The highest average income is at the 2 children hh.
+#With censoring, the number of people with 10000 income in male is much larger than that in female.
+
+#For "0" income hh:
+#almost same numbers in different age; as well as for gender;
+#most "0" income hh are married with 1 children.
+
+
+# Exercise 2 Heckman Selection Model
+#2.1 Specify and estimate an OLS model to explain the income variable (where income is positive)
+```{r}
+#set up dataset in this part (include income/age/gender/exper/edu/marital statu)
+d=select(dat,PUBID_1997,work_exp_years,sy.edu.parents,sy.edu.all)
+d1=left_join(d,c,by="PUBID_1997")
+names(d1)
+summary(d1$YINC_1700_2019.x)
+summary(d1$YINC_1700_2019.y)
+#only positive income
+d2.1=filter(d1,YINC_1700_2019.x>0)
+d2.2=filter(d1,YINC_1700_2019.y>0)
+#to explain income variable, we use ln(income) here, and all education variables included in sy.edu.all
+d2.1$ln.income.x = log(d2.1$YINC_1700_2019.x)
+d2.2$ln.income.y = log(d2.2$YINC_1700_2019.y)
+
+#ols with sy.edu.all with ln(YINC_1700_2019.x) where max(income) is 100000 (censoring)  
+olsmodel.lnincome2.1 <- lm(ln.income.x~ag+gender+marital+work_exp_years+sy.edu.all,data=d2.1)
+
+#ols with income where max(income) is 100000 (censoring) 
+olsmodel.income2.1 <- lm(YINC_1700_2019.x~ag+gender+marital+work_exp_years+sy.edu.all,data=d2.1)
+
+#ols with sy.edu.all with ln(YINC_1700_2019.y) where max(income) is 328451
+olsmodel.lnincome2.2 <- lm(ln.income.y~ag+gender+marital+work_exp_years+sy.edu.all,data=d2.2)
+
+#ols with income where max(income) is 328451
+olsmodel.income2.2 <- lm(YINC_1700_2019.y~ag+gender+marital+work_exp_years+sy.edu.all,data=d2.2)
+
+
+
+```
+
+```{r}
+#ols with sy.edu.all with ln(YINC_1700_2019.y) where max(income) is 328451
+olsmodel.income2.2 <- lm(ln.income.y~ag+gender+marital+work_exp_years+sy.edu.all,data=d2.2)
+summary(olsmodel.income2.2)
+
+```
+
+
+#2.1.1 Interpret the estimation results
+
+```{r}
+#=============
+#ln(income.x)~ag+gender+marital+work_exp_years+sy.edu.all
+#=============
+summary(olsmodel.lnincome2.1)
+```
+#Interpret with the edu variable (include own highest degree) and with ln(YINC_1700_2019.x) where max(income) is 100000 (censoring) which is ln(olsmodel2.1).
+#From the estimation results, we find that:
+#if you are female, your income will decrease 32.2% compared with male;
+#one more year in work experience will increase 3.56% in income;
+#one more year in education in whole hh will increase 1.01% in income.
+```{r}
+#=============
+#income.x~ag+gender+marital+work_exp_years+sy.edu.all
+#=============
+summary(olsmodel.income2.1)
+```
+#Interpret with the edu variable (include own highest degree) and with YINC_1700_2019.x where max(income) is 100000 (censoring) which is olsmodel2.1.
+#if you are female, your income will decrease -12962.92 compared with male;
+#one more year in work experience will increase 997.27 in income;
+#one more year in education in whole hh will increase 409.03 in income.
+```{r}
+#=============
+#ln(income.y)~ag+gender+marital+work_exp_years+sy.edu.all
+#=============
+summary(olsmodel.lnincome2.2)
+```
+#Interpret with the edu variable (include own highest degree) and with ln(YINC_1700_2019.y) where max(income) is 328451 which is ln(olsmodel2.2).
+#if you are female, your income will decrease 35.8% compared with male;
+#one more year in work experience will increase 3.65% in income;
+#one more year in education in whole hh will increase 1.144% in income.
+
+```{r}
+#=============
+#income.y~ag+gender+marital+work_exp_years+sy.edu.all
+#=============
+#Interpret with the edu variable (include own highest degree) 
+#and with ln(YINC_1700_2019.y) where max(income) is 328451 which is olsmodel2.2.
+summary(olsmodel.income2.2)
+```
+#if you are female, your income will decrease -18725.21 compared with male;
+#one more year in work experience will increase 1120.48 in income;
+#one more year in education in whole hh will increase 629.4 in income.
+
+
+
+#2.1.2 Explain why there might be a selection problem when estimating an OLS this way
+#selection problem may exist because the most efficient individuals have higher earnings and stay in school longer
+#only positive income is included in regression, and others with high education but not working are not included in regression sample.
+
+
+
+#2.2 Explain why the Heckman model can deal with the selection problem.
+
+#Use Heckman Two-Step Estimator to solve the selection problem produced by including only positive income
+#first, estimate a probit model, to estimate the probability that income is positive, 
+#then calculate IMR, partly(x*beta/theta)/whole(x*beta/theta), to control the bias.
+#second, include IMR in OLS.
+#Through the Heckman model, we control the selection bias with the rate estimated in first step. 
+
+
+#2.3.1 Estimate a Heckman selection model. Interpret the results from the Heckman selection model
+```{r}
+#(Note: You can not use a pre-programmed Heckman selection package. 
+#================
+#prepare data: for Heckman model
+#considering OLS model: income~ag+gender+marital+work_exp_years+sy.edu.all
+#and OLS model: ln(income)~ag+gender+marital+work_exp_years+sy.edu.all
+#================
+d3=subset(d1,d1$CV_MARSTAT_COLLAPSED_2019!='NA'&d1$YINC_1700_2019.x!='NA')
+#create indicator variable whether income equals to 0
+d3=mutate(d3,ind.income.x=0,ind.income.y=0)
+d3$ind.income.x[which(d3$YINC_1700_2019.x>0)] <- 1
+d3$ind.income.y[which(d3$YINC_1700_2019.y>0)] <- 1
+#create intersection variable
+d3$intersection = 1
+#create ln(income)
+d3=mutate(d3,ln.income.x=log(d3$YINC_1700_2019.x),ln.income.y=log(d3$YINC_1700_2019.y))
+d3$ln.income.x[which(d3$ln.income.x==-Inf)] <- 0
+d3$ln.income.y[which(d3$ln.income.y==-Inf)] <- 0
+#define income~ag+gender+marital+work_exp_years+sy.edu.all
+income.ind.x=d3$ind.income.x
+
+intsct=d3$intersection
+age2019=as.numeric(d3$age_2019)
+gender=as.numeric(d3$KEY_SEX_1997)
+marital.status=d3$CV_MARSTAT_COLLAPSED_2019
+wrk.exp.year=d3$work_exp_years
+edu.all=d3$sy.edu.all
+#=======================
+#Heckman Two-Step Estimator
+#=======================
+#Step 1: Probit Estimation of Probability
+
+set.seed(0)
+#likelihood 
+probit_flike = function(par,x1,x2,x3,x4,x5,x6,y){
+  yhat = par[1]*x1 + par[2]*x2 + par[3]*x3 + par[4]*x4 + par[5]*x5 + par[6]*x6
+  prob = pnorm(yhat)
+  like = y*log(prob) + (1-y)*log(1-prob)
+  return(-sum(like))
+}
+#optimize
+res  <- optim(runif(6,-0.1,0.1),fn=probit_flike,method="BFGS",
+              control=list(trace=6,REPORT=1,maxit=1000),
+              x1=intsct,x2=age2019,x3=gender,x4=marital.status,
+              x5=wrk.exp.year,x6=edu.all,y=income.ind.x,hessian=TRUE)
+res$par
+#===========
+#use glm()
+probit.ind.income <- glm(income.ind.x~age2019+gender+
+                           marital.status+wrk.exp.year+edu.all,
+                         family =binomial(link = "probit"))
+summary(probit.ind.income)
+probit.ind.income$coefficients
+#===========
+
+#compute IMR
+predict_fun = function(par,x1,x2,x3,x4,x5,x6,y){
+  yhat = par[1]*x1 + par[2]*x2 + par[3]*x3 + par[4]*x4 + par[5]*x5 + par[6]*x6
+  return(yhat)
+}
+#likelihood par
+predictor.likeli <- predict_fun(res$par,intsct,age2019,gender,marital.status,
+                                wrk.exp.year,edu.all,income.ind.x)
+IMR.likeli <- dnorm(predictor.likeli)/pnorm(predictor.likeli)
+#glm() par
+predictor.glm <- predict_fun(probit.ind.income$coefficients,intsct,
+                             age2019,gender,marital.status,wrk.exp.year,
+                             edu.all,income.ind.x)
+IMR.glm <- dnorm(predictor.glm)/pnorm(predictor.glm)
+
+
+#Step 2: Include Inverse Mills Ratio as a Regressor
+income.x=d3$YINC_1700_2019.x
+ln.income.x=d3$ln.income.x
+ols.heckman.income.x.likeli <- lm(income.x~age2019+gender+marital.status+
+                                    wrk.exp.year+edu.all+IMR.likeli)
+ols.heckman.income.x.glm <- lm(income.x~age2019+gender+marital.status+
+                                 wrk.exp.year+edu.all+IMR.glm)
+ols.heckman.lnincome.x.likeli <- lm(ln.income.x~age2019+gender+marital.status+wrk.exp.year+edu.all+IMR.likeli)
+ols.heckman.lnincome.x.glm <- lm(ln.income.x~age2019+gender+marital.status+
+                                   wrk.exp.year+edu.all+IMR.glm)
+
+#Interpret the Heckman results
+summary(ols.heckman.income.x.likeli)
+summary(ols.heckman.lnincome.x.likeli)
+summary(ols.heckman.income.x.glm)
+summary(ols.heckman.lnincome.x.glm)
+#almost the same while using likelihood function and glm in step 1
+#only gender and edu are significantly correlated with income, 
+#work experience and marital are not correalated to income
+```
+
+#2.3.2 compare the results to OLS results. Why does there exist a difference?
+```{r}
+#Only compare with YINC_1700_2019.x with censoring problem (use glm results in Heckman)
+#OLS model: income.x~ag+gender+marital+work_exp_years+sy.edu.all 
+summary(ols.heckman.income.x.glm)
+OLS.income.x <- lm(income.x~age2019+gender+marital.status+wrk.exp.year+edu.all)
+summary(OLS.income.x)
+#OLS model: ln.income.x~ag+gender+marital+work_exp_years+sy.edu.all
+summary(ols.heckman.lnincome.x.glm)
+OLS.lnincome.x <- lm(ln.income.x~age2019+gender+marital.status+wrk.exp.year+edu.all)
+summary(OLS.income.x)
+```
+#=========compare==============
+#because I include the IMR to solve the selection bias, work experience and marital status are no longer correlated with income.
+#Some people got married and decided not to work any more, so the income is zero, which results selection bias.
+#also, some people decide not to work and income is 0. 
+#IMR eliminates such selection bias,then, marital status and work experience are no longer correlated with income in regression.
+
+
+
+
+
+# Exercise 3 Censoring
+#3.1 Plot a histogram to check whether the distribution of the income variable. What might be the censored value here?
+```{r}
+#income in dat_A4 top-coded as 100000
+summary(d1$YINC_1700_2019.x)
+#plot
+ggplot(d1, aes(x=YINC_1700_2019.x)) +
+  geom_histogram()+
+  ggtitle("Cthe distribution of income")+
+  theme(plot.title=element_text(hjust=0.5))
+#compare with no censor income in panel
+ggplot(d1, aes(x=YINC_1700_2019.y)) +
+  geom_histogram()+
+  ggtitle("Cthe distribution of income")+
+  theme(plot.title=element_text(hjust=0.5))
+```
+#================
+#we found that top wages are coded as 10000, but the real max income is 30000+, so for part of income variable, we only observe the range, but not the exact value.
+#===============
+
+
+#3.2 Propose a model to deal with the censoring problem.
+#Use Tobit Model to deal with the censoring problem
+
+
+#3.3 Estimate the appropriate model with the censored data (please write down the likelihood function and optimize yourself without using the pre-programmed package)
+```{r}
+#Write the likelihood function and optimize for Tobit Model
+#=========prepare dataset======
+#create indicator variables whether the income is top-coded. 100000+
+d3$top.coded.income.x = 0
+d3$top.coded.income.x[which(d3$YINC_1700_2019.x<100000)] = 1
+top.coded.income.x = d3$top.coded.income.x
+
+#=========model==========
+#income.x ~ age2019+ gender + marital.status + wrk.exp.year + edu.all
+#========================
+set.seed(77)
+#likelihood function
+tobit_likeli = function(par,x1,x2,x3,x4,x5,x6,indct,y){
+  yhat = par[1]*x1 + par[2]*x2 + par[3]*x3 + par[4]*x4 + par[5]*x5 + par[6]*x6
+  res = y - yhat
+  standard = (100000-yhat)/exp(par[7])
+  like = indct*log(dnorm(res/exp(par[7]))/exp(par[7])) + (1-indct)*log(1 - pnorm(standard))
+  return(-sum(like))
+}
+
+#optimize with income
+tobit.income <- optim(runif(7,-20,20),fn=tobit_likeli,method="BFGS",
+                      control=list(trace=6,REPORT=1,maxit=1000),
+               x1=intsct,x2=age2019,x3=gender,x4=marital.status,x5=wrk.exp.year,x6=edu.all,
+               indct=top.coded.income.x,y=income.x,hessian=TRUE)
+tobit.income$par
+
+
+
+
+#reg.tobit <- tobit(income.x ~ age2019+ gender + marital.status + wrk.exp.year + edu.all,left=-Inf,right = 100000)
+#reg.tobit2 <- tobit(ln.income.x~ age2019+ gender + marital.status + wrk.exp.year + edu.all,left=-Inf,right = 100000)
+#summary(reg.tobit)
+#summary(reg.tobit2)
+
+```
+
+#3.4 Interpret the results above and compare to those when not correcting for the censored data
+```{r}
+tobit.income$par
+#===============interpret=============
+#income increases as age increase and work experience increase, as well as education years.
+#if you are female, your income will be lower than male.
+
+#===============compare=============
+#the OLS model with the censored data (ols)
+OLS.income.x$coefficients
+#compare with these results:
+#the significant change is the value of coefficient of gender
+#because the existence of censoring problem, the gender differences between income is much greater.
+
+```
+
+
+# Exercise 4 Panel Data
+```{r}
+#===========data prepare===============
+names(dat_A4_panel)
+```
+
+#4.1 Explain the potential ability bias when trying to explain to understand the determinants of wages
+#the theory of human capital and signaling theory both predict that the most productive individuals have an interest in studying for the longest period, entailing the possibility of the so called ability bias
+
+
+#4.2 Exploit the panel dimension of the data to propose a model to correct for the ability bias. Estimate the model using the following strategy.
+```{r}
+#=========prepare data (edu/marital status/work experience on income)====================
+#income in last year
+colnames(dat_A4_panel)[c(2,16,28,40,52,63,89,
+                         99,111,123,134,145,
+                         157,170,187,201,216,234,248)]=c("income.1997","income.1998","income.1999",
+                                                         "income.2000","income.2001","income.2002",
+                                                         "income.2003","income.2004","income.2005",
+                                                         "income.2006","income.2007","income.2008",
+                                                         "income.2009","income.2010","income.2011",
+                                                         "income.2013","income.2015","income.2017",
+                                                         "income.2019")
+
+#marital at the survey date
+colnames(dat_A4_panel)[c(6,18,30,42,54,65,78,
+                         91,101,113,125,136,
+                         147,160,173,190,203,218,236)]=c("mar.1997","mar.1998","mar.1999","mar.2000",
+                                                         "mar.2001","mar.2002","mar.2003","mar.2004",
+                                                         "mar.2005","mar.2006","mar.2007","mar.2008",
+                                                         "mar.2009","mar.2010","mar.2011","mar.2013",
+                                                         "mar.2015","mar.2017","mar.2019")
+
+
+#edu
+#there are two variables representing "highest degree ever received":
+#1998-2009: only "HIGHEST DEGREE RECEIVED PRIOR TO THE ACAD YEAR"
+#2010-2013: one is "The highest degree received as of the survey date"; 
+#"HIGHEST DEGREE RECEIVED PRIOR TO THE ACAD YEAR"
+#2015-2019: only "The highest degree received as of the survey date"
+#we use "THE ACAD YEAR" from 1998-2013, and "of the survey date" from 2015-2019
+#there are no significant differences in these two variables.
+colnames(dat_A4_panel)[c(17,29,41,53,64,77,
+                         90,100,112,124,135,146,
+                         159,172,189,202,217,235)]=c("edu.1998","edu.1999","edu.2000","edu.2001","edu.2002",
+                                                     "edu.2003","edu.2004","edu.2005","edu.2006","edu.2007",
+                                                     "edu.2008","edu.2009","edu.2010","edu.2011","edu.2013",
+                                                     "edu.2015","edu.2017","edu.2019")
+
+
+#work experience total (up to survey date), then, translate it into years (assume that there are 52 weeks in a year)
+dat.exp=dat_A4_panel[,c(7:13,19:27,31:39,43:51,55:62,66:76,79:88,
+                        92:98,102:110,114:122,126:133,137:144,148:156,
+                        161:169,174:186,191:200,204:215,219:233,237:247,1)]
+dat.exp[is.na(dat.exp)]<-0
+dat.exp = mutate(dat.exp,
+                 wrk.exp.1997 = rowSums(dat.exp[,1:7])/52, 
+                 wrk.exp.1998 = rowSums(dat.exp[,8:16])/52,
+                 wrk.exp.1999 = rowSums(dat.exp[,17:25])/52, 
+                 wrk.exp.2000 = rowSums(dat.exp[,26:34])/52,
+                 wrk.exp.2001 = rowSums(dat.exp[,35:42])/52, 
+                 wrk.exp.2002 = rowSums(dat.exp[,43:53])/52,
+                 wrk.exp.2003 = rowSums(dat.exp[,54:63])/52, 
+                 wrk.exp.2004 = rowSums(dat.exp[,64:70])/52,
+                 wrk.exp.2005 = rowSums(dat.exp[,71:79])/52, 
+                 wrk.exp.2006 = rowSums(dat.exp[,80:88])/52,
+                 wrk.exp.2007 = rowSums(dat.exp[,89:96])/52, 
+                 wrk.exp.2008 = rowSums(dat.exp[,97:104])/52,
+                 wrk.exp.2009 = rowSums(dat.exp[,105:113])/52, 
+                 wrk.exp.2010 = rowSums(dat.exp[,114:122])/52,
+                 wrk.exp.2011 = rowSums(dat.exp[,123:135])/52, 
+                 wrk.exp.2013 = rowSums(dat.exp[,136:145])/52,
+                 wrk.exp.2015 = rowSums(dat.exp[,146:157])/52, 
+                 wrk.exp.2017 = rowSums(dat.exp[,158:172])/52,
+                 wrk.exp.2019 = rowSums(dat.exp[,173:183])/52)
+dat.exp.year=dat.exp[,184:203]
+
+
+#The panel data used in this problem:
+dat.panel = select(dat_A4_panel,
+                   PUBID_1997,KEY_BDATE_Y_1997,KEY_BDATE_M_1997,KEY_SEX_1997,KEY_RACE_ETHNICITY_1997,
+                   income.1997,income.1998,income.1999,income.2000,income.2001,income.2002,
+                   income.2003,income.2004,income.2005,income.2006,income.2007,income.2008,
+                   income.2009,income.2010,income.2011,income.2013,income.2015,income.2017,income.2019,
+                   edu.1998,edu.1999,edu.2000,edu.2001,edu.2002,edu.2003,edu.2004,edu.2005,edu.2006,
+                   edu.2007,edu.2008,edu.2009,edu.2010,edu.2011,edu.2013,edu.2015,edu.2017,edu.2019,
+                   mar.1997,mar.1998,mar.1999,mar.2000,mar.2001,mar.2002,mar.2003,mar.2004,mar.2005,
+                   mar.2006,mar.2007,mar.2008,mar.2009,mar.2010,mar.2011,mar.2013,mar.2015,mar.2017,mar.2019)
+dat.panel = left_join(dat.panel,dat.exp.year,by="PUBID_1997")
+colnames(dat.panel)[2:5]=c("Birth.year","Birth.month","Sex","Race")
+
+#=======convert to long ============
+dat.panel.long = long_panel(dat.panel, prefix='.', begin  = 1997, end = 2019, label_location = "end")
+dat.panel.long = subset(dat.panel.long,wave!='2012' & wave!='2014' & wave!='2016' & wave!='2018')
+#=======age==========
+dat.panel.long$age=dat.panel.long$wave-dat.panel.long$Birth.year
+
+#======data used below======
+e = as.data.frame(dat.panel.long)
+e$id = as.numeric(e$id)
+e$income = as.numeric(e$income)
+e$age = as.numeric(e$age)
+e$Sex = as.numeric(e$Sex)
+e$wrk.exp = as.numeric(e$wrk.exp)
+e$edu <- as.numeric(e$edu)
+e$mar <- as.numeric(e$mar)
+
+```
+
+```{r}
+#4.2.1 Within Estimator
+e1 = e
+
+e1$meanincome <- ave(e1$income, e1$id, FUN=function(x)mean(x, na.rm=T))
+e1$meanedu <- ave(e1$edu, e1$id, FUN=function(x)mean(x, na.rm=T)) 
+e1$meanwrkex <- ave(e1$wrk.exp, e1$id, FUN=function(x)mean(x, na.rm=T)) 
+e1$meanmar<- ave(e1$mar, e1$id, FUN=function(x)mean(x, na.rm=T))
+
+e1$d.income <- e1$income - e1$meanincome
+e1$d.edu <- e1$edu - e1$meanedu
+e1$d.wrkex <- e1$wrk.exp - e1$meanwrkex
+e1$d.mar <- e1$mar - e1$meanmar
+
+panel.within.estimator <- lm(d.income~ 0+d.edu  + d.mar+ d.wrkex,e1)
+summary(panel.within.estimator)
+
+#==use package====
+within = plm(income ~  edu + mar + wrk.exp, e1, model = "within")
+summary(within)
+```
+
+
+```{r}
+#4.2.2 Between Estimator
+e2 = e
+
+m.inc=summarise(group_by(e2,id),income.mean=mean(income,na.rm = TRUE))
+m.age=summarise(group_by(e2,id),age.mean=mean(age,na.rm = TRUE))
+m.gender=summarise(group_by(e2,id),gender.mean=mean(Sex,na.rm = TRUE))
+m.wrkex=summarise(group_by(e2,id),wrkex.mean=mean(wrk.exp,na.rm = TRUE))
+m.edu=summarise(group_by(e2,id),edu.mean=mean(edu,na.rm = TRUE))
+m.mar=summarise(group_by(e2,id),mar.mean=mean(mar,na.rm = TRUE))
+
+
+panel.between.estimator <- lm(m.inc$income.mean~m.edu$edu.mean+
+                                m.mar$mar.mean+m.wrkex$wrkex.mean)
+summary(panel.between.estimator)
+
+#==use package====
+between = plm(income ~  edu + mar + wrk.exp, e2, model = "between")
+summary(between)
+```
+
+
+```{r}
+#4.2.3 Difference (any) Estimator
+e3 = select(e,id,wave,income,edu,mar,wrk.exp)
+
+e3$fir.inc = ave(e3$income,e3$id,FUN=function(x)x[1])
+e3$fir.edu = ave(e3$edu,e3$id,FUN=function(x)x[1])
+e3$fir.mar = ave(e3$mar,e3$id,FUN=function(x)x[1])
+e3$fir.wrk.exp = ave(e3$wrk.exp,e3$id,FUN=function(x)x[1])
+
+e3$fd.inc = e3$income - e3$fir.inc
+e3$fd.edu = e3$edu - e3$fir.edu
+e3$fd.mar = e3$mar - e3$fir.mar
+e3$fd.wrk.exp = e3$wrk.exp - e3$fir.wrk.exp
+
+#panel.fd.estimator <- lm(fd.inc~fd.edu+fd.mar+fd.wrk.exp,e3)
+#==use package====
+fd = plm(income ~  edu + mar + wrk.exp, e2, model = "fd")
+summary(fd)
+```
+
+#4.3 Interpret the results from each model and explain why different models yield different parameter estimates
+```{r}
+within.co = as.vector(c(NaN,within$coefficients))
+between.co=as.vector(between$coefficients)
+fd.co=as.factor(fd$coefficients)
+result=data.frame(within.co,between.co,fd.co)
+result
+```
+#the result in fd model has the smallest coefficient, while the within model has the largest coefficients.
+#the differences are due to the differences in different groups
+#within estimators indicate the differences on individual level;
+#between estimators indicate the differences between different individual;
+#fd estimators control the individual heterogeneity.
+
